@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  gpuinfo:
+    # build:
+    #   context: ./rust
+    #   dockerfile: Dockerfile
+    image: rust:1.67
+    entrypoint: /entrypoint.sh
+    command: ["/bin/gpuinfo_api"]
+    ports:
+      - "3030:3030"
+    environment:
+      - LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/syslib:/usr/local/nvidia/applib:/usr/cuda/lib64
+      - RUSTFLAGS=-L /usr/local/nvidia/lib -L /usr/local/nvidia/syslib -L /usr/local/nvidia/applib -L /usr/cuda/lib64
+    devices:
+      - /dev/nvidia0:/dev/nvidia0
+      - /dev/nvidiactl:/dev/nvidiactl
+      - /dev/nvidia-caps:/dev/nvidia-caps
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+    volumes:
+      - ./rust:/src
+      - ./entrypoint.sh:/entrypoint.sh
+      - /share/ZFS531_DATA/.qpkg/NVIDIA_GPU_DRV/usr:/usr/local/nvidia
+      - /share/ZFS531_DATA/.qpkg/NVIDIA_GPU_DRV/cuda-11.7:/usr/cuda
+
