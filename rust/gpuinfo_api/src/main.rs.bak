@@ -1,0 +1,261 @@
+use warp::Filter;
+use nvml_wrapper::{NVML, error::Error as NvmlError};
+use serde::Serialize;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use std::net::SocketAddr;
+use nvml_wrapper::enums::device::UsedGpuMemory;
+
+// Define a struct for JSON response
+#[derive(Serialize)]
+struct TemperatureResponse {
+    temperature: f32,
+    device_name: String,
+}
+
+#[derive(Serialize)]
+struct MemoryResponse {
+    total_memory: u64,
+    free_memory: u64,
+    used_memory: u64,
+}
+
+#[derive(Serialize)]
+struct ProcessResponse {
+    pid: u32,
+    name: String,
+    used_memory: u64,
+}
+
+#[tokio::main]
+async fn main() {
+    // Initialize NVML
+    let nvml = NVML::init().expect("Failed to initialize NVML");
+    let nvml = Arc::new(Mutex::new(nvml));
+    
+
+    // Define routes
+    let nvml_filter = warp::any().map(move || Arc::clone(&nvml));
+    
+    // Temperature route
+    let temp_route = warp::path("temperature")
+        .and(nvml_filter.clone())
+        .and_then(handle_temperature);
+
+    // Memory route
+    let memory_route = warp::path("memory")
+        .and(nvml_filter.clone())
+        .and_then(handle_memory);
+
+    // Processes route
+    let processes_route = warp::path("processes")
+        .and(nvml_filter.clone())
+        .and_then(handle_processes);
+
+    let gpu_info_route = warp::path("gpu_info")
+        .and(nvml_filter.clone())
+        .and_then(handle_gpu_info);
+            
+
+    // Get the IP address from environment variable or use default
+    let ip_address = std::env::var("LISTEN_IP").unwrap_or_else(|_| "0.0.0.0".to_string());
+    let port = 3030;
+
+    // Construct the server address
+    let server_address = format!("{}:{}", ip_address, port);
+    let addr = server_address.parse::<SocketAddr>().expect("Invalid IP address or port");
+
+    // Start the server
+    println!("Server started on address {}", addr);
+
+    // Serve the routes
+    let routes = temp_route.or(memory_route).or(processes_route).or(gpu_info_route);
+    warp::serve(routes)
+        .run(addr)
+        .await;
+}
+
+async fn handle_temperature(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
+    let nvml = nvml.lock().await;
+
+    // Get device temperature
+    let temp = match get_gpu_temperature(&nvml) {
+        Ok(temp) => temp,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Get device name
+    let device_name = match get_gpu_device_name(&nvml) {
+        Ok(name) => name,
+        Err(_) => "Unknown".to_string(),
+    };
+
+    // Construct response
+    let response = TemperatureResponse {
+        temperature: temp,
+        device_name: device_name,
+    };
+
+    Ok(warp::reply::json(&response))
+}
+
+async fn handle_memory(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
+    let nvml = nvml.lock().await;
+
+    // Get memory info
+    let memory_info = match get_gpu_memory_info(&nvml) {
+        Ok(info) => info,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Construct response
+    let response = MemoryResponse {
+        total_memory: memory_info.total_memory,
+        free_memory: memory_info.free_memory,
+        used_memory: memory_info.used_memory,
+    };
+
+    Ok(warp::reply::json(&response))
+}
+
+async fn handle_processes(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
+    match get_processes(nvml).await {
+        Ok(processes) => Ok(warp::reply::json(&processes)),
+        Err(err) => {
+            eprintln!("Failed to retrieve GPU processes: {:?}", err);
+            Err(warp::reject::not_found()) // Return a 404 Not Found response or handle the error appropriately
+        }
+    }
+}
+
+
+// Dummy function to simulate getting process name from PID
+fn get_process_name(pid: u32) -> Option<String> {
+    // In a real implementation, you would query the system for the process name
+    // Here, we'll just return a dummy process name
+    Some(format!("process_{}", pid))
+}
+fn get_gpu_temperature(nvml: &NVML) -> Result<f32, NvmlError> {
+    let device = nvml.device_by_index(0)?;
+    let temp = device.temperature(nvml_wrapper::enum_wrappers::device::TemperatureSensor::Gpu)?;
+    Ok(temp as f32)
+}
+
+fn get_gpu_device_name(nvml: &NVML) -> Result<String, NvmlError> {
+    let device = nvml.device_by_index(0)?;
+    Ok(device.name()?)
+}
+
+fn get_gpu_memory_info(nvml: &NVML) -> Result<MemoryInfo, NvmlError> {
+    let device = nvml.device_by_index(0)?;
+    let memory_info = device.memory_info()?;
+
+    Ok(MemoryInfo {
+        total_memory: memory_info.total,
+        free_memory: memory_info.free,
+        used_memory: memory_info.used,
+    })
+}
+
+// Function to retrieve processes information
+async fn get_processes(nvml: Arc<Mutex<NVML>>) -> Result<Vec<ProcessResponse>, NvmlError> {
+    let nvml = nvml.lock().await;
+
+    // Get the device handle for the first GPU (assuming a single GPU for simplicity)
+    let device = match nvml.device_by_index(0) {
+        Ok(dev) => dev,
+        Err(err) => return Err(err), // Return the actual error from NVML
+    };
+
+    // Get the list of compute processes running on the GPU
+    let compute_processes_info = match device.running_compute_processes() {
+        Ok(info) => info,
+        Err(err) => return Err(err), // Return the actual error from NVML
+    };
+
+    // Get the list of graphics processes running on the GPU
+    let graphics_processes_info = match device.running_graphics_processes() {
+        Ok(info) => info,
+        Err(err) => return Err(err), // Return the actual error from NVML
+    };
+
+    // Combine both lists of processes
+    let mut processes_info = compute_processes_info;
+    processes_info.extend(graphics_processes_info);
+
+    // Convert processes info into ProcessResponse objects
+    let response: Vec<ProcessResponse> = processes_info.into_iter()
+        .map(|process| ProcessResponse {
+            pid: process.pid,
+            name: get_process_name(process.pid).unwrap_or_else(|| "unknown".to_string()),
+            used_memory: match process.used_gpu_memory {
+                UsedGpuMemory::Used(mem) => mem,
+                UsedGpuMemory::Unavailable => 0,
+            },
+        })
+        .collect();
+
+    Ok(response)
+}
+
+async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
+    // Acquire the lock to get access to NVML
+    let nvml_guard = nvml.lock().await;
+    let nvml_arc = Arc::clone(&nvml);
+
+    // Get device temperature
+    let temperature = match get_gpu_temperature(&nvml_guard) {
+        Ok(temp) => temp,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Get device name
+    let device_name = match get_gpu_device_name(&nvml_guard) {
+        Ok(name) => name,
+        Err(_) => "Unknown".to_string(),
+    };
+
+    // Get memory info
+    let memory_info = match get_gpu_memory_info(&nvml_guard) {
+        Ok(info) => info,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    drop(nvml_guard); // Release the lock to avoid nested locks
+
+    // Get processes info
+    let processes_info = match get_processes(nvml_arc).await {
+        Ok(processes) => processes,
+        Err(_) => vec![],  // Handle error, here we just return an empty list
+    };
+
+    // Construct response
+    let response = GpuInfoResponse {
+        temperature,
+        device_name,
+        total_memory: memory_info.total_memory,
+        free_memory: memory_info.free_memory,
+        used_memory: memory_info.used_memory,
+        processes: processes_info, // Include processes info in the response
+    };
+
+    Ok(warp::reply::json(&response))
+}
+
+
+
+struct MemoryInfo {
+    total_memory: u64,
+    free_memory: u64,
+    used_memory: u64,
+}
+
+#[derive(Serialize)]
+struct GpuInfoResponse {
+    temperature: f32,
+    device_name: String,
+    total_memory: u64,
+    free_memory: u64,
+    used_memory: u64,
+    processes: Vec<ProcessResponse>, // New field to hold processes information
+}
