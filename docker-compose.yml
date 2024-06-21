@@ -4,11 +4,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    #image: rust:1.67
     image: edgecrush3r/gpuinfo
     container_name: gpuinfo_api
     command: ["gpuinfo_api"]
     #command: ["bash"]
+    #network_mode: host
     ports:
       - "3040:3030"
     environment:

@@ -273,14 +273,12 @@ async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, war
         Ok(info) => info,
         Err(_) => return Err(warp::reject::not_found()),
     };
-
  
     // Get processes info
     let processes_info = match get_processes(&nvml_guard) {
         Ok(processes) => processes,
         Err(_) => vec![],  // Handle error, here we just return an empty list
     };    
-
 
     // Get power usage
     let power_usage = match get_gpu_power_usage(&nvml_guard) {
