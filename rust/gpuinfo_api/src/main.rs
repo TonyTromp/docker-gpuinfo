@@ -97,7 +97,7 @@ async fn handle_temperature(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, 
         device_name: device_name,
     };
 
-    Ok(warp::reply::json(&response))
+    Ok(warp::reply::json(&[response]))
 }
 
 async fn handle_memory(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {

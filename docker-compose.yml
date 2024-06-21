@@ -8,7 +8,7 @@ services:
     entrypoint: /entrypoint.sh
     command: ["/bin/gpuinfo_api"]
     ports:
-      - "3030:3030"
+      - "3040:3030"
     environment:
       - LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/syslib:/usr/local/nvidia/applib:/usr/cuda/lib64
       - RUSTFLAGS=-L /usr/local/nvidia/lib -L /usr/local/nvidia/syslib -L /usr/local/nvidia/applib -L /usr/cuda/lib64
