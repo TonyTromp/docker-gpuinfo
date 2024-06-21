@@ -7,6 +7,13 @@ use std::net::SocketAddr;
 use nvml_wrapper::enums::device::UsedGpuMemory;
 
 // Define a struct for JSON response
+struct MemoryInfo {
+    total_memory: u64,
+    free_memory: u64,
+    used_memory: u64,
+}
+
+
 #[derive(Serialize)]
 struct TemperatureResponse {
     temperature: f32,
@@ -26,6 +33,24 @@ struct ProcessResponse {
     name: String,
     used_memory: u64,
 }
+
+#[derive(Serialize)]
+struct PowerResponse {
+    power_usage: u32,  // Power usage in milliwatts
+    power_limit: u32,  // Power limit in milliwatts
+}
+
+#[derive(Serialize)]
+struct GpuInfoResponse {
+    temperature: f32,
+    device_name: String,
+    total_memory: u64,
+    free_memory: u64,
+    used_memory: u64,
+    processes: Vec<ProcessResponse>, // New field to hold processes information
+    power: PowerResponse,
+}
+
 
 #[tokio::main]
 async fn main() {
@@ -56,7 +81,11 @@ async fn main() {
     let gpu_info_route = warp::path("info")
         .and(nvml_filter.clone())
         .and_then(handle_gpu_info);
-            
+
+    // Power route
+    let power_route = warp::path("power")
+        .and(nvml_filter.clone())
+        .and_then(handle_power);
 
     // Get the IP address from environment variable or use default
     let ip_address = std::env::var("LISTEN_IP").unwrap_or_else(|_| "0.0.0.0".to_string());
@@ -70,7 +99,14 @@ async fn main() {
     println!("Server started on address {}", addr);
 
     // Serve the routes
-    let routes = temp_route.or(memory_route).or(processes_route).or(gpu_info_route);
+    // let routes = temp_route.or(memory_route).or(processes_route).or(gpu_info_route);
+    // Serve the routes
+    let routes = temp_route
+        .or(memory_route)
+        .or(processes_route)
+        .or(gpu_info_route)
+        .or(power_route);
+
     warp::serve(routes)
         .run(addr)
         .await;
@@ -199,6 +235,23 @@ async fn get_processes(nvml: Arc<Mutex<NVML>>) -> Result<Vec<ProcessResponse>, N
     Ok(response)
 }
 
+
+fn get_gpu_power_usage(nvml: &NVML) -> Result<u32, NvmlError> {
+    let device = nvml.device_by_index(0)?;
+    let power_usage = device.power_usage()?; // Power usage in milliwatts
+    Ok(power_usage)
+}
+
+fn get_gpu_power_limit(nvml: &NVML) -> Result<u32, NvmlError> {
+    let device = nvml.device_by_index(0)?;
+    let power_limit = device.enforced_power_limit()?; // Power limit in milliwatts
+    Ok(power_limit)
+}
+
+
+//
+// Handlers
+//
 async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
     // Acquire the lock to get access to NVML
     let nvml_guard = nvml.lock().await;
@@ -222,13 +275,37 @@ async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, war
         Err(_) => return Err(warp::reject::not_found()),
     };
 
-    drop(nvml_guard); // Release the lock to avoid nested locks
-
     // Get processes info
     let processes_info = match get_processes(nvml_arc).await {
         Ok(processes) => processes,
         Err(_) => vec![],  // Handle error, here we just return an empty list
     };
+
+    // Get processes info
+    let processes = match get_processes(Arc::clone(&nvml)).await {
+        Ok(procs) => procs,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+    
+    // Get power usage
+    let power_usage = match get_gpu_power_usage(&*nvml_guard) {
+        Ok(usage) => usage,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Get power limit
+    let power_limit = match get_gpu_power_limit(&*nvml_guard) {
+        Ok(limit) => limit,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Construct response
+    let power_response = PowerResponse {
+        power_usage,
+        power_limit,
+    };
+    
+    drop(nvml_guard); // Release the lock to avoid nested locks
 
     // Construct response
     let response = GpuInfoResponse {
@@ -238,25 +315,35 @@ async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, war
         free_memory: memory_info.free_memory,
         used_memory: memory_info.used_memory,
         processes: processes_info, // Include processes info in the response
+        power: power_response
     };
 
     Ok(warp::reply::json(&response))
 }
 
 
+async fn handle_power(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
+    let nvml = nvml.lock().await;
 
-struct MemoryInfo {
-    total_memory: u64,
-    free_memory: u64,
-    used_memory: u64,
+    // Get power usage
+    let power_usage = match get_gpu_power_usage(&nvml) {
+        Ok(usage) => usage,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Get power limit
+    let power_limit = match get_gpu_power_limit(&nvml) {
+        Ok(limit) => limit,
+        Err(_) => return Err(warp::reject::not_found()),
+    };
+
+    // Construct response
+    let response = PowerResponse {
+        power_usage,
+        power_limit,
+    };
+
+    Ok(warp::reply::json(&response))
 }
 
-#[derive(Serialize)]
-struct GpuInfoResponse {
-    temperature: f32,
-    device_name: String,
-    total_memory: u64,
-    free_memory: u64,
-    used_memory: u64,
-    processes: Vec<ProcessResponse>, // New field to hold processes information
-}
+

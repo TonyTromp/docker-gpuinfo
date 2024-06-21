@@ -6,7 +6,13 @@ As I am running lots of GPU powered docker container, i find it helpfull to know
 
 ## Building it
 ```
-docker compose build
+docker compose up -d
+docker exec -ti gpuinfo_api bash
+
+rm -f ~/.cargo/.package-cache
+cd /src/gpuinfo_api
+cargo build
+cargo install
 ```
 
 ## Running it

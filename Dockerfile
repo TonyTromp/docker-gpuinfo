@@ -1,19 +1,43 @@
-FROM rust:1.67
+# Use the NVIDIA CUDA base image with Ubuntu 20.04
+FROM nvidia/cuda:11.7.1-base-ubuntu20.04 as base
+
+# Set environment variables for non-interactive installations
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    cuda-nvml-dev-11-7 \
+    cmake \
+    git \
+    wget \
+    curl \
+    vim && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+FROM base as builder
 
 WORKDIR /usr/src/gpuinfo
 COPY rust/gpuinfo_api/. .
 
-#     -v /share/ZFS531_DATA/.qpkg/NVIDIA_GPU_DRV/usr:/usr/local/nvidia \
-#    -v /share/ZFS531_DATA/.qpkg/NVIDIA_GPU_DRV/cuda-11.7:/usr/cuda \
-RUN mkdir /usr/local/nvidia
-RUN mkdir /usr/cuda
+# Build the Rust application
+# /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs/libnvidia-ml.so
+# RUN find / -name libnvidia-ml.so
+RUN RUSTFLAGS='-L /usr/local/cuda-11.7/targets/x86_64-linux/lib -L /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs' \
+  cargo build --release
 
-COPY /share/ZFS531_DATA/.qpkg/NVIDIA_GPU_DRV/usr /usr/local/nvidia
-COPY /share/ZFS531_DATA/.qpkg/NVIDIA_GPU_DRV/cuda-11.7 /usr/cuda
+RUN RUSTFLAGS='-L /usr/local/cuda-11.7/targets/x86_64-linux/lib -L /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs' \
+  cargo install --path .
 
-#RUN ./build.sh
-RUN RUSTFLAGS='-L /usr/local/nvidia/lib -L /usr/local/nvidia/syslib -L /usr/local/nvidia/applib -L /usr/cuda/lib64' cargo install --path .
-#RUN cargo install --path .
+# Expose any ports if needed
+EXPOSE 3030
 
 CMD ["gpuinfo_api"]
+
 

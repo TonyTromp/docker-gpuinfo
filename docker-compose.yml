@@ -1,12 +1,14 @@
 version: '3.8'
 services:
   gpuinfo:
-    # build:
-    #   context: ./rust
-    #   dockerfile: Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: rust:1.67
+    container_name: gpuinfo_api
     entrypoint: /entrypoint.sh
-    command: ["/bin/gpuinfo_api"]
+    #command: ["/bin/gpuinfo_api"]
+    #command: ["bash"]
     ports:
       - "3040:3030"
     environment:
