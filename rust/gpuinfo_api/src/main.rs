@@ -156,7 +156,9 @@ async fn handle_memory(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp:
 }
 
 async fn handle_processes(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
-    match get_processes(nvml).await {
+    let nvml = nvml.lock().await;
+
+    match get_processes(&nvml) {
         Ok(processes) => Ok(warp::reply::json(&processes)),
         Err(err) => {
             eprintln!("Failed to retrieve GPU processes: {:?}", err);
@@ -195,9 +197,7 @@ fn get_gpu_memory_info(nvml: &NVML) -> Result<MemoryInfo, NvmlError> {
 }
 
 // Function to retrieve processes information
-async fn get_processes(nvml: Arc<Mutex<NVML>>) -> Result<Vec<ProcessResponse>, NvmlError> {
-    let nvml = nvml.lock().await;
-
+fn get_processes(nvml: &NVML) -> Result<Vec<ProcessResponse>, NvmlError> {
     // Get the device handle for the first GPU (assuming a single GPU for simplicity)
     let device = match nvml.device_by_index(0) {
         Ok(dev) => dev,
@@ -255,7 +255,6 @@ fn get_gpu_power_limit(nvml: &NVML) -> Result<u32, NvmlError> {
 async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::Rejection> {
     // Acquire the lock to get access to NVML
     let nvml_guard = nvml.lock().await;
-    let nvml_arc = Arc::clone(&nvml);
 
     // Get device temperature
     let temperature = match get_gpu_temperature(&nvml_guard) {
@@ -275,29 +274,27 @@ async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, war
         Err(_) => return Err(warp::reject::not_found()),
     };
 
+ 
     // Get processes info
-    let processes_info = match get_processes(nvml_arc).await {
+    let processes_info = match get_processes(&nvml_guard) {
         Ok(processes) => processes,
         Err(_) => vec![],  // Handle error, here we just return an empty list
-    };
+    };    
 
-    // Get processes info
-    let processes = match get_processes(Arc::clone(&nvml)).await {
-        Ok(procs) => procs,
-        Err(_) => return Err(warp::reject::not_found()),
-    };
-    
+
     // Get power usage
-    let power_usage = match get_gpu_power_usage(&*nvml_guard) {
+    let power_usage = match get_gpu_power_usage(&nvml_guard) {
         Ok(usage) => usage,
         Err(_) => return Err(warp::reject::not_found()),
     };
 
     // Get power limit
-    let power_limit = match get_gpu_power_limit(&*nvml_guard) {
+    let power_limit = match get_gpu_power_limit(&nvml_guard) {
         Ok(limit) => limit,
         Err(_) => return Err(warp::reject::not_found()),
     };
+
+    drop(nvml_guard); // Release the lock to avoid nested locks
 
     // Construct response
     let power_response = PowerResponse {
@@ -305,7 +302,6 @@ async fn handle_gpu_info(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, war
         power_limit,
     };
     
-    drop(nvml_guard); // Release the lock to avoid nested locks
 
     // Construct response
     let response = GpuInfoResponse {
@@ -345,5 +341,4 @@ async fn handle_power(nvml: Arc<Mutex<NVML>>) -> Result<impl warp::Reply, warp::
 
     Ok(warp::reply::json(&response))
 }
-
 

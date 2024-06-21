@@ -1,5 +1,6 @@
 # Use the NVIDIA CUDA base image with Ubuntu 20.04
 FROM nvidia/cuda:11.7.1-base-ubuntu20.04 as base
+#FROM 11.7.1-cudnn8-runtime-ubuntu22.04 as base
 
 # Set environment variables for non-interactive installations
 ENV DEBIAN_FRONTEND=noninteractive
@@ -29,8 +30,8 @@ COPY rust/gpuinfo_api/. .
 # Build the Rust application
 # /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs/libnvidia-ml.so
 # RUN find / -name libnvidia-ml.so
-RUN RUSTFLAGS='-L /usr/local/cuda-11.7/targets/x86_64-linux/lib -L /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs' \
-  cargo build --release
+#RUN RUSTFLAGS='-L /usr/local/cuda-11.7/targets/x86_64-linux/lib -L /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs' \
+# cargo build --release
 
 RUN RUSTFLAGS='-L /usr/local/cuda-11.7/targets/x86_64-linux/lib -L /usr/local/cuda-11.7/targets/x86_64-linux/lib/stubs' \
   cargo install --path .
